@@ -24,7 +24,12 @@ router.post("/login", loginOwner);
 router.use(verifyToken); // All routes below require auth
 
 // Owner profile (used by frontend token validation)
-router.get("/profile", getOwnerProfile);
+router.get("/profile", (req, res) => {
+  res.json({
+    success: true,
+    user: req.user,
+  });
+});
 router.post("/add-clients", createClient);
 router.get("/clients", getAllClients);
 router.get("/search-clients", searchClients);

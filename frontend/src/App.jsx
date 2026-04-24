@@ -70,14 +70,9 @@ const App = () => {
     if (!userToken) return;
     setIsFetching(true);
     try {
-      // 3. Added auth headers so the server doesn't reject the request
-      const authConfig = {
-        headers: { Authorization: `Bearer ${userToken}` },
-      };
-
       const [clientsRes, entriesRes] = await Promise.all([
-        axios.get("/api/owner/clients", authConfig),
-        axios.get("/api/owner/entries", authConfig),
+        axios.get("/api/owner/clients"),
+        axios.get("/api/owner/entries"),
       ]);
 
       if (clientsRes.data.success) {

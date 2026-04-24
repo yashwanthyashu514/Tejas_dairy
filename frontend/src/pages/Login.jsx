@@ -93,8 +93,10 @@ const Login = () => {
       });
 
       if (res.data.success) {
+        // 🔥 IMPORTANT: SAVE TOKEN
         setUserToken(res.data.token);
-        localStorage.setItem("userToken", res.data.token);
+        localStorage.setItem("token", res.data.token);
+
         toast.success(res.data.message || "Welcome back!");
         navigate("/");
       } else {

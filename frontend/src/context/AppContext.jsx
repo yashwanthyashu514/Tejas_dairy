@@ -44,7 +44,7 @@ export const AppProvider = ({ children }) => {
   const navigate = useNavigate();
   // Read token exactly once on mount
   const [userToken, setUserTokenState] = useState(
-    () => localStorage.getItem("userToken") || "",
+    () => localStorage.getItem("token") || "",
   );
   const [userData, setUserData] = useState(null);
   const [isValidatingToken, setIsValidatingToken] = useState(true);
@@ -54,9 +54,9 @@ export const AppProvider = ({ children }) => {
   const setUserToken = useCallback((token) => {
     setUserTokenState(token);
     if (token) {
-      localStorage.setItem("userToken", token);
+      localStorage.setItem("token", token);
     } else {
-      localStorage.removeItem("userToken");
+      localStorage.removeItem("token");
     }
   }, []);
 
@@ -67,8 +67,10 @@ export const AppProvider = ({ children }) => {
     }
     interceptorRef.current = axiosInstance.interceptors.request.use(
       (config) => {
-        const token = localStorage.getItem("userToken");
-        if (token) config.headers.Authorization = `Bearer ${token}`;
+        const token = localStorage.getItem("token");
+        if (token) {
+          config.headers.Authorization = `Bearer ${token}`;
+        }
         return config;
       },
     );
@@ -93,7 +95,7 @@ export const AppProvider = ({ children }) => {
 
   // Validate token on app load
   const validateToken = useCallback(async () => {
-    const stored = localStorage.getItem("userToken");
+    const stored = localStorage.getItem("token");
     if (!stored) {
       setIsValidatingToken(false);
       return;
@@ -101,11 +103,10 @@ export const AppProvider = ({ children }) => {
 
     try {
       // NOTE: Make sure "/api/owner/profile" is the correct endpoint!
-      // If your backend uses something like "/api/owner/get-profile", change it here.
       const { data } = await axiosInstance.get("/api/owner/profile");
 
       if (data.success) {
-        setUserData(data.data || data.userData);
+        setUserData(data.user || data.data || data.userData);
       } else {
         // Only clear if the server explicitly tells us the JWT is expired/invalid
         if (
@@ -116,8 +117,6 @@ export const AppProvider = ({ children }) => {
         }
       }
     } catch (error) {
-      // FIX: Only clear the token if the backend threw a 401 (Unauthorized)
-      // Do NOT clear the token for network errors, 404s, or 500s!
       if (error.response?.status === 401) {
         setUserToken("");
       } else {
@@ -150,6 +149,7 @@ export const AppProvider = ({ children }) => {
   const logout = useCallback(() => {
     setUserToken("");
     setUserData(null);
+    localStorage.removeItem("token");
     toast.success("Logged out securely.");
     navigate("/login");
   }, [navigate, setUserToken]);
