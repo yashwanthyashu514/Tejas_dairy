@@ -452,20 +452,26 @@ const PaymentBilling = ({ selectedClient, entries, setEntries }) => {
   };
 
   const handleSaveEdit = async () => {
-    if (!editingEntry) return;
+    if (!editingEntry || !selectedClient) return;
     setIsUpdating(true);
     try {
-      const res = await apiRequest("PUT", `/api/owner/entries/${editingEntry}`, editForm);
+      const res = await apiRequest("PUT", `/api/owner/entries/${editingEntry}`, {
+        ltrs: parseFloat(editForm.ltrs),
+        fat: parseFloat(editForm.fat),
+        snf: parseFloat(editForm.snf),
+        rate: parseFloat(editForm.rate),
+      });
       if (res.success) {
         toast.success("Entry updated!");
         setEditingEntry(null);
-        setLedgerEntries((prev) =>
-          prev.map((e) =>
-            (e._id === editingEntry || e.id === editingEntry)
-              ? { ...e, ...res.data }
-              : e
-          )
-        );
+        // Re-fetch ledger from server to get accurate updated data
+        const cId = selectedClient.id || selectedClient._id;
+        const ledgerRes = await axios.get("/api/owner/entries", {
+          params: { clientId: cId, startDate: from, endDate: to },
+        });
+        if (ledgerRes.data.success) setLedgerEntries(ledgerRes.data.data);
+      } else {
+        toast.error(res.message || "Update failed.");
       }
     } catch (err) {
       toast.error("Failed to update entry.");
