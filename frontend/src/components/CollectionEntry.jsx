@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Droplets,
@@ -13,6 +13,8 @@ import {
   Loader2,
   X,
   Calendar,
+  MonitorSmartphone,
+  Cpu
 } from "lucide-react";
 import { useAppContext } from "../context/AppContext";
 
@@ -121,6 +123,30 @@ const CollectionEntry = ({ selectedClient, onSave }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [pinnedRates, setPinnedRates] = useState([]);
   const [error, setError] = useState("");
+  
+  // Analyzer Integration States
+  const [inputMode, setInputMode] = useState("manual"); // "manual" | "auto"
+  const [serialConnected, setSerialConnected] = useState(false);
+  const [machineStatus, setMachineStatus] = useState("Waiting for Essae MA-815 connection...");
+  const portRef = useRef(null);
+  const readerRef = useRef(null);
+  const abortControllerRef = useRef(null);
+  const lastFetchedRef = useRef("");
+
+  // Safely close the port when the component unmounts
+  useEffect(() => {
+    return () => {
+      const shutdown = async () => {
+        if (readerRef.current) {
+          try { await readerRef.current.cancel(); } catch (e) {}
+        }
+        if (portRef.current) {
+          try { await portRef.current.close(); } catch (e) {}
+        }
+      };
+      shutdown();
+    };
+  }, []);
 
   const amount = (parseFloat(quantity) || 0) * (parseFloat(rate) || 0);
   const isValid =
@@ -157,8 +183,113 @@ const CollectionEntry = ({ selectedClient, onSave }) => {
     setSnf("");
     setRate("");
     setError("");
+    lastFetchedRef.current = ""; // Clear fetch history for identical successive tests
     setEntryDate(getISTDateString()); // Reset to today's IST date
   }, []);
+
+  const handleConnectAnalyzer = async () => {
+    try {
+      if (!("serial" in navigator)) {
+        toast.error("Web Serial API not supported. Use Chrome or Edge.");
+        return;
+      }
+
+      const port = await navigator.serial.requestPort();
+      await port.open({ 
+        baudRate: 9600, 
+        dataBits: 8, 
+        stopBits: 1, 
+        parity: "none" 
+      });
+      portRef.current = port;
+
+      setSerialConnected(true);
+      setMachineStatus("MA-815ABS connected. Waiting for sample...");
+      toast.success("Essae MA-815ABS connected!");
+
+      const textDecoder = new TextDecoderStream();
+      abortControllerRef.current = new AbortController();
+      port.readable.pipeTo(textDecoder.writable, { 
+        signal: abortControllerRef.current.signal 
+      }).catch(() => {}); // AbortError naturally occurs on explicit disconnect
+      
+      const reader = textDecoder.readable.getReader();
+      readerRef.current = reader;
+
+      let buffer = "";
+      try {
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+
+          buffer += value;
+
+          if (buffer.includes("\n") || buffer.includes("\r")) {
+            const lines = buffer.split(/\r?\n/);
+            buffer = lines.pop(); // keep incomplete last chunk
+
+            for (const line of lines) {
+              const dataLine = line.trim();
+              if (!dataLine) continue;
+
+              setMachineStatus(`Raw: ${dataLine}`);
+
+              // Attempt explicit label parsing first (e.g., FAT: 3.60)
+              const fatMatch = dataLine.match(/FAT[:\s]+(\d+\.\d+)/i);
+              const snfMatch = dataLine.match(/SNF[:\s]+(\d+\.\d+)/i);
+
+              if (fatMatch || snfMatch) {
+                if (fatMatch) setFat(fatMatch[1]);
+                if (snfMatch) setSnf(snfMatch[1]);
+                
+                const newKey = `${fatMatch?.[1]}-${snfMatch?.[1]}`;
+                if (newKey !== lastFetchedRef.current) {
+                  lastFetchedRef.current = newKey;
+                  toast.success("Fat & SNF fetched automatically!");
+                }
+              } else {
+                // Positional CSV fallback
+                const decimals = dataLine.match(/\d+\.\d+/g);
+                if (decimals && decimals.length >= 2) {
+                  setFat(decimals[0]);   // Fat %
+                  setSnf(decimals[1]);   // SNF %
+                  
+                  const newKey = `${decimals[0]}-${decimals[1]}`;
+                  if (newKey !== lastFetchedRef.current) {
+                    lastFetchedRef.current = newKey;
+                    toast.success("Fat & SNF fetched automatically!");
+                  }
+                }
+              }
+            }
+          }
+        }
+      } catch (err) {
+        setSerialConnected(false);
+        setMachineStatus("Connection lost. Reconnect the device.");
+      } finally {
+        reader.releaseLock();
+      }
+    } catch (e) {
+      setMachineStatus("Port selection cancelled or failed.");
+    }
+  };
+
+  const handleDisconnectAnalyzer = async () => {
+    try {
+      abortControllerRef.current?.abort();
+      if (readerRef.current) {
+        await readerRef.current.cancel().catch(() => {});
+      }
+      if (portRef.current) {
+        await portRef.current.close().catch(() => {});
+      }
+    } catch(err) {}
+    setSerialConnected(false);
+    setMachineStatus("Waiting for Essae MA-815 connection...");
+    portRef.current = null;
+    readerRef.current = null;
+  };
 
   const handleSave = async () => {
     if (!isValid) return;
@@ -347,6 +478,55 @@ const CollectionEntry = ({ selectedClient, onSave }) => {
         </div>
       </div>
 
+      {/* Input Mode Toggle */}
+      <div className="flex bg-[#F7F4EF] rounded-[14px] p-2 mb-4 border border-[#E8E0D0] gap-2 items-center">
+        <div className="flex-1 flex gap-1">
+          <button
+            onClick={() => setInputMode("manual")}
+            disabled={isLoading}
+            className={`flex-1 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
+              inputMode === "manual" ? "bg-[#0D1B2A] text-white shadow-sm" : "text-[#8A9BB0] hover:text-[#0D1B2A]"
+            }`}
+          >
+            Manual Entry
+          </button>
+          <button
+            onClick={() => setInputMode("auto")}
+            disabled={isLoading}
+            className={`flex-1 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
+              inputMode === "auto" ? "bg-[#166B4D] text-white shadow-sm" : "text-[#8A9BB0] hover:text-[#166B4D]"
+            }`}
+          >
+            Auto (Analyzer)
+          </button>
+        </div>
+      </div>
+
+      {inputMode === "auto" && (
+        <motion.div initial={{opacity:0, height:0}} animate={{opacity:1, height:"auto"}} className="mb-4">
+          <div className="bg-[#F0F7F3] border border-[#B5DDCA] rounded-[14px] p-4 text-center shadow-inner">
+             {!serialConnected ? (
+                <div className="flex flex-col items-center gap-2.5">
+                  <Cpu size={24} color="#166B4D" />
+                  <div className="text-[11px] text-[#166B4D] font-bold tracking-wide">Connect Essae MA-815 via COM Port</div>
+                  <button onClick={handleConnectAnalyzer} className="bg-[#166B4D] text-white text-[10px] tracking-widest font-black px-5 py-2.5 rounded-[9px] mt-1 cursor-pointer hover:bg-[#11503A] transition-colors shadow-sm">
+                    AUTHORIZE MACHINE PORT
+                  </button>
+                </div>
+             ) : (
+                <div className="flex flex-col items-center gap-2">
+                  <MonitorSmartphone size={24} color="#166B4D" className="animate-pulse" />
+                  <div className="text-[11px] text-[#166B4D] font-black uppercase tracking-widest">Live Sync Active</div>
+                  <div className="text-[10px] text-[#166B4D]/70 font-mono bg-white px-3 py-1 rounded-md border border-[#B5DDCA]/50 inline-block">{machineStatus}</div>
+                  <button onClick={handleDisconnectAnalyzer} className="text-[#991B1B] bg-[#FEF2F2] border border-[#FECACA] text-[9px] font-black tracking-widest px-4 py-1.5 rounded-lg mt-1 cursor-pointer transition-colors hover:bg-red-100">
+                    DISCONNECT
+                  </button>
+                </div>
+             )}
+          </div>
+        </motion.div>
+      )}
+
       {/* Inputs Grid */}
       <div className="grid grid-cols-3 gap-2.5 mb-4">
         <InputField
@@ -361,6 +541,7 @@ const CollectionEntry = ({ selectedClient, onSave }) => {
           label="Fat %"
           value={fat}
           onChange={(e) => setFat(e.target.value)}
+          readOnly={serialConnected && inputMode === "auto"}
           disabled={isLoading}
           suffix="%"
           placeholder="0.0"
@@ -369,6 +550,7 @@ const CollectionEntry = ({ selectedClient, onSave }) => {
           label="SNF %"
           value={snf}
           onChange={(e) => setSnf(e.target.value)}
+          readOnly={serialConnected && inputMode === "auto"}
           disabled={isLoading}
           suffix="%"
           placeholder="0.0"
