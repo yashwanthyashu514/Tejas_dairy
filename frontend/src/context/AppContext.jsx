@@ -35,8 +35,10 @@ try {
   cleanUrl = "http://localhost:5000";
 }
 
+console.log("BASE URL:", cleanUrl);
+
 const axiosInstance = axios.create({
-  baseURL: cleanUrl,
+  baseURL: cleanUrl.endsWith("/") ? cleanUrl : `${cleanUrl}/`,
   withCredentials: true,
 });
 
