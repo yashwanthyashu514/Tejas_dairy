@@ -4,5 +4,5 @@ import react from '@vitejs/plugin-react'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
-  base: "/Tejas_dairy_fetch/",
+  base: process.env.GITHUB_ACTIONS ? "/Tejas_dairy_fetch/" : "/",
 })
