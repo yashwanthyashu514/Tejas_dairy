@@ -100,23 +100,23 @@ export const createClient = async (req, res) => {
       });
     }
 
-    // Generate sequential serial ID (e.g., TD-00001)
-    // 1. Find the client with the highest numeric serialId
+    // Generate sequential serial ID (e.g., TB-3331)
+    // 1. Find the client with the highest numeric serialId with prefix TB-
     const lastClient = await ClientModel.findOne({
-      serialId: { $regex: /^TD-\d+$/ }, // Ignores old hex IDs if you have any
+      serialId: { $regex: /^TB-\d+$/ }, 
     }).sort({ serialId: -1 });
 
-    // 2. Determine the next number
-    let nextNumber = 1;
+    // 2. Determine the next number (starts from 3331)
+    let nextNumber = 3331;
     if (lastClient && lastClient.serialId) {
-      const lastNumber = parseInt(lastClient.serialId.replace("TD-", ""), 10);
+      const lastNumber = parseInt(lastClient.serialId.replace("TB-", ""), 10);
       if (!isNaN(lastNumber)) {
         nextNumber = lastNumber + 1;
       }
     }
 
-    // 3. Format it with leading zeros to always be 5 digits
-    const serialId = `TD-${String(nextNumber).padStart(5, "0")}`;
+    // 3. Format it with leading zeros (at least 4 digits)
+    const serialId = `TB-${String(nextNumber).padStart(4, "0")}`;
 
     const client = await ClientModel.create({
       serialId,
